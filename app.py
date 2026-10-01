@@ -10,10 +10,10 @@ st.write("Browser-based Gemini Flash OCR & Field Extraction Pipeline")
 # Retrieve API key securely from Streamlit Secrets or Environment
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
+# Supported Gemini models for google-genai SDK
 GEMINI_FLASH_MODELS = [
     "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-1.5-flash"
+    "gemini-2.5-flash-lite"
 ]
 
 def gemini_flash_api(client, prompt, image=None):
