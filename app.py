@@ -15,18 +15,33 @@ if not GEMINI_API_KEY:
     st.error("GEMINI_API_KEY is missing. Please add it to Streamlit Secrets.")
     st.stop()
 
-# Configure Legacy/Standard Gemini SDK
+# Configure Gemini SDK
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Models to try in order
-GEMINI_MODELS = [
-    "gemini-1.5-flash",
-    "gemini-1.5-pro"
-]
+# Helper function to auto-detect working models for your API key
+@st.cache_resource
+def get_available_models():
+    try:
+        models = []
+        for m in genai.list_models():
+            if "generateContent" in m.supported_generation_methods:
+                clean_name = m.name.replace("models/", "")
+                models.append(clean_name)
+        
+        # Prioritize flash models, then pro, then any other supported model
+        flash_models = [m for m in models if "flash" in m]
+        other_models = [m for m in models if "flash" not in m]
+        sorted_models = flash_models + other_models
+        
+        return sorted_models if sorted_models else ["gemini-1.5-flash"]
+    except Exception as e:
+        return ["gemini-1.5-flash", "gemini-1.5-pro"]
 
 def gemini_call(prompt, image=None, retries=1):
+    available_models = get_available_models()
     last_error = None
-    for model_name in GEMINI_MODELS:
+
+    for model_name in available_models:
         for attempt in range(retries + 1):
             try:
                 model = genai.GenerativeModel(model_name)
@@ -43,8 +58,8 @@ def gemini_call(prompt, image=None, retries=1):
                 last_error = "Empty response returned."
             except Exception as e:
                 last_error = str(e)
-                # Catch 404/429 errors and try the next model
-                if "404" in last_error or "429" in last_error or "quota" in last_error.lower():
+                # If 404/400 model error, break loop and try the next available model
+                if "404" in last_error or "400" in last_error or "quota" in last_error.lower():
                     break
                 if attempt < retries:
                     time.sleep(2)
