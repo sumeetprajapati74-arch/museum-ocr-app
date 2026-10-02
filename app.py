@@ -44,22 +44,28 @@ GEMINI_FLASH_MODELS = [
 # ============================================================
 # 3. UNIVERSAL GEMINI CALL
 # ============================================================
+GEMINI_FLASH_MODELS = [
+    "gemini-1.5-flash",
+    "gemini-2.0-flash-exp",
+    "gemini-1.5-pro"
+]
 
 def gemini_flash_call(prompt, image=None, retries=1):
     contents = [image, prompt] if image else prompt
     last_error = None
 
-    for model in GEMINI_FLASH_MODELS:
+    for model_name in GEMINI_FLASH_MODELS:
         for attempt in range(retries + 1):
             try:
+                # Standard model call syntax
                 response = gemini_client.models.generate_content(
-                    model=model,
+                    model=model_name,
                     contents=contents
                 )
-                if response.text:
+                if response and response.text:
                     return {
                         "text": response.text.strip(),
-                        "model": model,
+                        "model": model_name,
                         "status": "SUCCESS",
                         "error": None
                     }
