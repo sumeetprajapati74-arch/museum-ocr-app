@@ -1,66 +1,38 @@
-# ============================================================
-# Museum Specimens Detection and Information Extraction System
-# Streamlit Deployment App
-# ============================================================
-
 import os
 import re
 import time
 import streamlit as st
 from PIL import Image
-from google import genai
+import google.generativeai as genai
 
-# ============================================================
-# 1. PAGE SETUP & GEMINI API KEY
-# ============================================================
+# Page Configuration
+st.set_page_config(page_title="Museum Specimen Extractor", layout="wide")
 
-st.set_page_config(
-    page_title="Museum Specimen Extractor",
-    layout="wide"
-)
-
-# Fetch API Key from Streamlit Secrets or Environment Variable
-GEMINI_API_KEY = None
-if "GEMINI_API_KEY" in st.secrets:
-    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-else:
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Retrieve API Key
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 
 if not GEMINI_API_KEY:
     st.error("GEMINI_API_KEY is missing. Please add it to Streamlit Secrets.")
     st.stop()
 
-# ============================================================
-# 2. GEMINI CLIENT & MODEL LIST
-# ============================================================
+# Configure Legacy/Standard Gemini SDK
+genai.configure(api_key=GEMINI_API_KEY)
 
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-
-GEMINI_FLASH_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash"
+# Models to try in order
+GEMINI_MODELS = [
+    "gemini-1.5-flash",
+    "gemini-1.5-pro"
 ]
 
-# ============================================================
-# 3. UNIVERSAL GEMINI CALL
-# ============================================================
-GEMINI_FLASH_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash"
-]
-
-def gemini_flash_call(prompt, image=None, retries=1):
-    contents = [image, prompt] if image else prompt
+def gemini_call(prompt, image=None, retries=1):
     last_error = None
-
-    for model_name in GEMINI_FLASH_MODELS:
+    for model_name in GEMINI_MODELS:
         for attempt in range(retries + 1):
             try:
-                response = gemini_client.models.generate_content(
-                    model=model_name,
-                    contents=contents
-                )
+                model = genai.GenerativeModel(model_name)
+                contents = [image, prompt] if image else [prompt]
+                response = model.generate_content(contents)
+                
                 if response and response.text:
                     return {
                         "text": response.text.strip(),
@@ -68,32 +40,23 @@ def gemini_flash_call(prompt, image=None, retries=1):
                         "status": "SUCCESS",
                         "error": None
                     }
-                last_error = "Gemini returned empty output."
+                last_error = "Empty response returned."
             except Exception as e:
-                last_error = e
-                error_text = str(e)
-
-                # Skip to next model if model not found or quota exceeded
-                if "404" in error_text or "429" in error_text or "quota" in error_text.lower():
+                last_error = str(e)
+                # Catch 404/429 errors and try the next model
+                if "404" in last_error or "429" in last_error or "quota" in last_error.lower():
                     break
-
-                if any(code in error_text for code in ["500", "502", "503", "504"]):
-                    if attempt < retries:
-                        time.sleep(2)
-                        continue
-                    break
+                if attempt < retries:
+                    time.sleep(2)
+                    continue
                 break
 
     return {
         "text": "",
         "model": None,
         "status": "FAILED",
-        "error": str(last_error) if last_error else "Unknown error"
+        "error": last_error or "Unknown error"
     }
-
-# ============================================================
-# 4. PROCESSING STAGES
-# ============================================================
 
 def run_ocr(image):
     prompt = """
@@ -108,7 +71,7 @@ HANDWRITTEN:
 PRINTED:
 <printed text>
 """
-    return gemini_flash_call(prompt, image=image)
+    return gemini_call(prompt, image=image)
 
 def correct_ocr(ocr_text):
     prompt = f"""
@@ -119,7 +82,7 @@ Preserve exact names, dates, place names, and numbers.
 OCR TEXT:
 {ocr_text}
 """
-    return gemini_flash_call(prompt)
+    return gemini_call(prompt)
 
 def extract_information(corrected_text):
     prompt = f"""
@@ -133,11 +96,7 @@ LOCALITY: <value or MISSING>
 TEXT:
 {corrected_text}
 """
-    return gemini_flash_call(prompt)
-
-# ============================================================
-# 5. LOCAL FALLBACK & PARSING
-# ============================================================
+    return gemini_call(prompt)
 
 KNOWN_LOCALITIES = [
     "Rösnæs", "Svinø strand", "Lodskovvad", "Dyrehaven",
@@ -223,12 +182,9 @@ def process_specimen(image):
 
     return corrected_text, information, verification_status, "SUCCESS"
 
-# ============================================================
-# 6. STREAMLIT UI
-# ============================================================
-
+# Streamlit Interface
 st.title("Museum Specimens Detection & Information Extraction System")
-st.write("AI-powered museum specimen label processing using Gemini Flash OCR.")
+st.write("AI-powered museum specimen label processing using Gemini OCR.")
 
 uploaded_file = st.file_uploader("Upload Museum Specimen Image", type=["jpg", "jpeg", "png"])
 
