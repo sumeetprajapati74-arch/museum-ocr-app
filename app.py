@@ -45,9 +45,9 @@ GEMINI_FLASH_MODELS = [
 # 3. UNIVERSAL GEMINI CALL
 # ============================================================
 GEMINI_FLASH_MODELS = [
-    "gemini-1.5-flash",
-    "gemini-2.0-flash-exp",
-    "gemini-1.5-pro"
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash"
 ]
 
 def gemini_flash_call(prompt, image=None, retries=1):
@@ -57,7 +57,6 @@ def gemini_flash_call(prompt, image=None, retries=1):
     for model_name in GEMINI_FLASH_MODELS:
         for attempt in range(retries + 1):
             try:
-                # Standard model call syntax
                 response = gemini_client.models.generate_content(
                     model=model_name,
                     contents=contents
@@ -74,7 +73,8 @@ def gemini_flash_call(prompt, image=None, retries=1):
                 last_error = e
                 error_text = str(e)
 
-                if "429" in error_text or "quota" in error_text.lower():
+                # Skip to next model if model not found or quota exceeded
+                if "404" in error_text or "429" in error_text or "quota" in error_text.lower():
                     break
 
                 if any(code in error_text for code in ["500", "502", "503", "504"]):
