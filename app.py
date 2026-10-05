@@ -9,7 +9,7 @@ from supabase import create_client
 # Page Configuration
 st.set_page_config(page_title="Museum Specimen Extractor", layout="wide")
 
-# Secrets & Environment Variables Retrieval
+# Retrieve API Keys & Configs
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 SUPABASE_URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
@@ -29,16 +29,30 @@ if SUPABASE_URL and SUPABASE_KEY:
     except Exception as e:
         st.warning(f"Could not connect to Supabase: {e}")
 
-# Supported models to try sequentially
-GEMINI_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash"
-]
+# Helper function to auto-detect supported models for your key/endpoint
+@st.cache_resource
+def get_available_models():
+    try:
+        models = []
+        for m in genai.list_models():
+            if "generateContent" in m.supported_generation_methods:
+                clean_name = m.name.replace("models/", "")
+                models.append(clean_name)
+        
+        # Prioritize flash models, then remaining models
+        flash_models = [m for m in models if "flash" in m]
+        other_models = [m for m in models if "flash" not in m]
+        sorted_models = flash_models + other_models
+        
+        return sorted_models if sorted_models else ["gemini-1.5-flash"]
+    except Exception:
+        return ["gemini-1.5-flash", "gemini-1.5-pro"]
 
 def gemini_call(prompt, image=None, retries=1):
+    available_models = get_available_models()
     last_error = None
-    for model_name in GEMINI_MODELS:
+
+    for model_name in available_models:
         for attempt in range(retries + 1):
             try:
                 model = genai.GenerativeModel(model_name)
@@ -55,10 +69,7 @@ def gemini_call(prompt, image=None, retries=1):
                 last_error = "Empty response returned."
             except Exception as e:
                 last_error = str(e)
-                # If model is not found, jump directly to the next model in GEMINI_MODELS
-                if "404" in last_error or "not found" in last_error.lower():
-                    break
-                if "429" in last_error or "quota" in last_error.lower():
+                if "404" in last_error or "400" in last_error or "quota" in last_error.lower():
                     break
                 if attempt < retries:
                     time.sleep(2)
@@ -214,7 +225,7 @@ def process_specimen(image, image_name="specimen_image.png"):
         f"EXTRACTION MODEL: {extraction_model}"
     )
 
-    # Database Auto-Save Trigger
+    # Save to Supabase
     save_status, save_msg = save_to_supabase(
         image_name=image_name,
         ocr_text=ocr_text,
