@@ -175,7 +175,7 @@ def save_to_supabase(image_name, ocr_text, corrected_text, date, locality, ver_s
 def process_specimen(image, image_name="specimen_image.png"):
     ocr_result = run_ocr(image)
     if not ocr_result["text"]:
-        return "", "", "REVIEW REQUIRED", f"Gemini OCR failed: {ocr_result['error']}"
+        return "", "", "REVIEW REQUIRED", f"Gemini OCR failed: {ocr_result['error']}", False, "OCR step failed."
 
     ocr_text = ocr_result["text"]
     ocr_model = ocr_result["model"]
