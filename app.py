@@ -4,12 +4,15 @@ import time
 import streamlit as st
 from PIL import Image
 import google.generativeai as genai
+from supabase import create_client
 
 # Page Configuration
 st.set_page_config(page_title="Museum Specimen Extractor", layout="wide")
 
-# Retrieve API Key
+# Secrets & Environment Variables Retrieval
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+SUPABASE_URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
 
 if not GEMINI_API_KEY:
     st.error("GEMINI_API_KEY is missing. Please add it to Streamlit Secrets.")
@@ -18,30 +21,23 @@ if not GEMINI_API_KEY:
 # Configure Gemini SDK
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Helper function to auto-detect working models for your API key
-@st.cache_resource
-def get_available_models():
+# Initialize Supabase Client
+supabase = None
+if SUPABASE_URL and SUPABASE_KEY:
     try:
-        models = []
-        for m in genai.list_models():
-            if "generateContent" in m.supported_generation_methods:
-                clean_name = m.name.replace("models/", "")
-                models.append(clean_name)
-        
-        # Prioritize flash models, then pro, then any other supported model
-        flash_models = [m for m in models if "flash" in m]
-        other_models = [m for m in models if "flash" not in m]
-        sorted_models = flash_models + other_models
-        
-        return sorted_models if sorted_models else ["gemini-1.5-flash"]
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     except Exception as e:
-        return ["gemini-1.5-flash", "gemini-1.5-pro"]
+        st.warning(f"Could not connect to Supabase: {e}")
+
+# Models to try in order
+GEMINI_MODELS = [
+    "gemini-1.5-flash",
+    "gemini-1.5-pro"
+]
 
 def gemini_call(prompt, image=None, retries=1):
-    available_models = get_available_models()
     last_error = None
-
-    for model_name in available_models:
+    for model_name in GEMINI_MODELS:
         for attempt in range(retries + 1):
             try:
                 model = genai.GenerativeModel(model_name)
@@ -58,8 +54,7 @@ def gemini_call(prompt, image=None, retries=1):
                 last_error = "Empty response returned."
             except Exception as e:
                 last_error = str(e)
-                # If 404/400 model error, break loop and try the next available model
-                if "404" in last_error or "400" in last_error or "quota" in last_error.lower():
+                if "404" in last_error or "429" in last_error or "quota" in last_error.lower():
                     break
                 if attempt < retries:
                     time.sleep(2)
@@ -157,7 +152,27 @@ def parse_information(structured_text):
 
     return extracted_date, extracted_locality
 
-def process_specimen(image):
+def save_to_supabase(image_name, ocr_text, corrected_text, date, locality, ver_status, ocr_m, corr_m, ext_m):
+    if not supabase:
+        return False, "Supabase client not initialized."
+    try:
+        data = {
+            "image_name": image_name,
+            "ocr_text": ocr_text,
+            "corrected_text": corrected_text,
+            "specimen_date": date,
+            "locality": locality,
+            "verification_status": ver_status,
+            "ocr_model": ocr_m,
+            "correction_model": corr_m,
+            "extraction_model": ext_m
+        }
+        supabase.table("museum_specimens").insert(data).execute()
+        return True, "Successfully saved record to Supabase database!"
+    except Exception as e:
+        return False, f"Failed to save to Supabase: {str(e)}"
+
+def process_specimen(image, image_name="specimen_image.png"):
     ocr_result = run_ocr(image)
     if not ocr_result["text"]:
         return "", "", "REVIEW REQUIRED", f"Gemini OCR failed: {ocr_result['error']}"
@@ -195,7 +210,20 @@ def process_specimen(image):
         f"EXTRACTION MODEL: {extraction_model}"
     )
 
-    return corrected_text, information, verification_status, "SUCCESS"
+    # Database Auto-Save Trigger
+    save_status, save_msg = save_to_supabase(
+        image_name=image_name,
+        ocr_text=ocr_text,
+        corrected_text=corrected_text,
+        date=extracted_date,
+        locality=extracted_locality,
+        ver_status=verification_status,
+        ocr_m=ocr_model,
+        corr_m=correction_model,
+        ext_m=extraction_model
+    )
+
+    return corrected_text, information, verification_status, "SUCCESS", save_status, save_msg
 
 # Streamlit Interface
 st.title("Museum Specimens Detection & Information Extraction System")
@@ -213,10 +241,15 @@ if uploaded_file is not None:
 
     with col2:
         with st.spinner("Processing image via Gemini API..."):
-            corrected_text, info, ver_status, proc_status = process_specimen(image)
+            corrected_text, info, ver_status, proc_status, db_success, db_msg = process_specimen(image, uploaded_file.name)
 
         st.subheader("Results")
         st.text_input("Processing Status", value=proc_status, disabled=True)
         st.text_input("Verification Status", value=ver_status, disabled=True)
         st.text_area("Structured Information", value=info, height=150)
         st.text_area("Corrected OCR Text", value=corrected_text, height=200)
+
+        if db_success:
+            st.success(db_msg)
+        else:
+            st.warning(db_msg)
