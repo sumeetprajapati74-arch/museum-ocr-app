@@ -29,10 +29,11 @@ if SUPABASE_URL and SUPABASE_KEY:
     except Exception as e:
         st.warning(f"Could not connect to Supabase: {e}")
 
-# Models to try in order
+# Supported models to try sequentially
 GEMINI_MODELS = [
-    "gemini-1.5-flash",
-    "gemini-1.5-pro"
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash"
 ]
 
 def gemini_call(prompt, image=None, retries=1):
@@ -54,7 +55,10 @@ def gemini_call(prompt, image=None, retries=1):
                 last_error = "Empty response returned."
             except Exception as e:
                 last_error = str(e)
-                if "404" in last_error or "429" in last_error or "quota" in last_error.lower():
+                # If model is not found, jump directly to the next model in GEMINI_MODELS
+                if "404" in last_error or "not found" in last_error.lower():
+                    break
+                if "429" in last_error or "quota" in last_error.lower():
                     break
                 if attempt < retries:
                     time.sleep(2)
