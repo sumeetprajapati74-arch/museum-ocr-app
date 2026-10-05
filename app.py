@@ -29,7 +29,7 @@ if SUPABASE_URL and SUPABASE_KEY:
     except Exception as e:
         st.warning(f"Could not connect to Supabase: {e}")
 
-# Helper function to auto-detect supported models for your key/endpoint
+# Helper function to auto-detect supported models for your key
 @st.cache_resource
 def get_available_models():
     try:
@@ -39,14 +39,14 @@ def get_available_models():
                 clean_name = m.name.replace("models/", "")
                 models.append(clean_name)
         
-        # Prioritize flash models, then remaining models
+        # Prioritize flash models
         flash_models = [m for m in models if "flash" in m]
         other_models = [m for m in models if "flash" not in m]
         sorted_models = flash_models + other_models
         
-        return sorted_models if sorted_models else ["gemini-1.5-flash"]
+        return sorted_models if sorted_models else ["gemini-2.5-flash", "gemini-2.0-flash"]
     except Exception:
-        return ["gemini-1.5-flash", "gemini-1.5-pro"]
+        return ["gemini-2.5-flash", "gemini-2.0-flash"]
 
 def gemini_call(prompt, image=None, retries=1):
     available_models = get_available_models()
