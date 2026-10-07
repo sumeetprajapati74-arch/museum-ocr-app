@@ -4,15 +4,15 @@ import time
 import streamlit as st
 from PIL import Image
 import google.generativeai as genai
-from supabase import create_client
+from supabase import create_client, Client
 
 # Page Configuration
 st.set_page_config(page_title="Museum Specimen Extractor", layout="wide")
 
-# Retrieve API Keys & Configs
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-SUPABASE_URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
+# Retrieve API Keys & Configs dynamically
+GEMINI_API_KEY = (st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip()
+SUPABASE_URL = (st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL") or "").strip()
+SUPABASE_KEY = (st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY") or "").strip()
 
 if not GEMINI_API_KEY:
     st.error("GEMINI_API_KEY is missing. Please add it to Streamlit Secrets.")
@@ -21,13 +21,14 @@ if not GEMINI_API_KEY:
 # Configure Gemini SDK
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Initialize Supabase Client
-supabase = None
-if SUPABASE_URL and SUPABASE_KEY:
-    try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    except Exception as e:
-        st.warning(f"Could not connect to Supabase: {e}")
+# Initialize Supabase Client with Streamlit Caching
+@st.cache_resource
+def get_supabase_client(url: str, key: str) -> Client:
+    if not url or not key:
+        return None
+    return create_client(url, key)
+
+supabase = get_supabase_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Helper function to auto-detect supported models for your key
 @st.cache_resource
@@ -44,9 +45,9 @@ def get_available_models():
         other_models = [m for m in models if "flash" not in m]
         sorted_models = flash_models + other_models
         
-        return sorted_models if sorted_models else ["gemini-2.5-flash", "gemini-2.0-flash"]
+        return sorted_models if sorted_models else ["gemini-1.5-flash", "gemini-1.5-pro"]
     except Exception:
-        return ["gemini-2.5-flash", "gemini-2.0-flash"]
+        return ["gemini-1.5-flash", "gemini-1.5-pro"]
 
 def gemini_call(prompt, image=None, retries=1):
     available_models = get_available_models()
@@ -169,7 +170,7 @@ def parse_information(structured_text):
 
 def save_to_supabase(image_name, ocr_text, corrected_text, date, locality, ver_status, ocr_m, corr_m, ext_m):
     if not supabase:
-        return False, "Supabase client not initialized."
+        return False, "Supabase client not initialized. Check your secrets."
     try:
         data = {
             "image_name": image_name,
